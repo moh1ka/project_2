@@ -96,8 +96,10 @@ float *M2;
 float *M3; 
 float *M4; 
 float *G; 
+float *P;
+
 float lambda = 0.1; 
-float alpha = 5.0;  // alpha will probably be around 2 to 4
+float alpha = 2.0;  // alpha will probably be around 2 to 4
 int counter = 0; 
 float min(float a, float b){
 	if(b<a)a=b;
@@ -110,19 +112,20 @@ float max(float a, float b){
 
 float tau1 = 0.02;
 float tau2 = 0.08;
-float *P;
-float *data_squ;
-int enhance_1 = 1;	//1,2,3,4
+int enhance_1 = 1;	//0 off; 1 on
+int enhance_3 = 0;	//0 off; 1 on
+int enhance_4 = 0;	//0 off; 1 on
+int enhance_6 = 0;
 int G_index = 1;	//1 to 4
+
+float alpha_6 = 4.0; 
  /******************************* Function prototypes *******************************/
 void init_hardware(void);    	/* Initialize codec */ 
 void init_HWI(void);            /* Initialize hardware interrupts */
 void ISR_AIC(void);             /* Interrupt service routine for codec */
 void process_frame(void);       /* Frame processing routine */
   
-void lpf_1(float *data, float t);
-//void lpf_2(float *data, float t); 
-        
+void lpf_1(float *data, float t);     
 /********************************** Main routine ************************************/
 void main()
 {      
@@ -138,10 +141,18 @@ void main()
     inwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Input window */
     outwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Output window */
 	intermediate = (float *) calloc(FFTLEN, sizeof(float)); /* Array for processing*/
+	
 	mag	     	= (float *) calloc(FFTLEN, sizeof(float)); /* Array for processing*/
 	mag_min	    = (float *) calloc(FFTLEN, sizeof(float)); 
 	copy_x	= (float *) calloc(FFTLEN, sizeof(float));
 	P = (float *) calloc(FFTLEN, sizeof(float));
+		//Min noise buffers
+	M1	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	M2	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	M3	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	M4	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	G	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	
 	/* initialize board and the audio port */
   	init_hardware();
   
@@ -242,29 +253,21 @@ void process_frame(void)
 	
 	/*deal with noise here*/
 	counter++;
+	
 	for(i=0; i<FFTLEN; i++){
 		mag[i] = cabs(c[i]);
-		copy_x[i] = mag[i];
+		copy_x[i] = cabs(c[i]);
 	}
 	
-	switch (enhance_1){
-		case 1:
-		lpf_1(mag,tau1);
-		break;
-//		case 2:
-//		lpf_2(mag,tau1);
-//		break;
-		case 4:
-		lpf_1(mag,tau2);
-		break;
-		
-	}
+	if(enhance_1 == 1)lpf_1(mag,tau1);
+	if(enhance_4 == 1)lpf_1(mag,tau2);
 
 	memcpy (M1, mag, FFTLEN*sizeof(float));
+	
 	for(i=0; i<FFTLEN; i++){
 		M1[i] = min(M1[i],mag[i]);
 	}
-	if(counter == 79){
+	if(counter == 78){
 		counter = 0;
 		memcpy (M4, M3, FFTLEN*sizeof(float));
 		memcpy (M3, M2, FFTLEN*sizeof(float));
@@ -276,9 +279,10 @@ void process_frame(void)
 		mag_min[i] =  min(M1[i], M2[i]);
 		mag_min[i] =  min(M3[i], mag_min[i]);
 		mag_min[i] = ( alpha * (min(M4[i], mag_min[i])) );
-		if(enhance_1 == 3)lpf_1(mag_min, tau1);
-		if(enhance_1 == 4){
-			switch (G_index){
+		
+		if(enhance_3 == 1)lpf_1(mag_min, tau1);
+		if(enhance_4 == 1){
+			switch(G_index){
 				case 1:
 				G[i] = max( lambda*(mag_min[i]/copy_x[i]), ( 1 - (mag_min[i]/copy_x[i])));
 				break;
@@ -292,9 +296,20 @@ void process_frame(void)
 				G[i] = max( lambda,  ( 1 - (mag_min[i]/mag[i]) ) );
 				break;
 			}
-		}else G[i] = max( lambda, ( 1 - (mag_min[i]/copy_x[i])));
+		}
+		if(enhance_6 == 1){
+			for(i=0;i<20;i++){
+			mag_min[i]= alpha_6* (mag_min[i]/alpha);
+			}
+			G[i] = max( lambda,  ( 1 - (mag_min[i]/mag[i])*(mag_min[i]/mag[i])) );
+		}
+		else{
+			G[i] = max( lambda, ( 1 - (mag_min[i]/copy_x[i])));
+		}
+
 		c[i] = rmul( G[i], c[i]);
 	}
+	
 	ifft(FFTLEN,c);
 	for(i=0; i<FFTLEN; i++){
 		outframe[i] = c[i].r;
@@ -344,7 +359,6 @@ void ISR_AIC(void){
 void lpf_1(float *data, float t){
 	
 	int i;
-	//float tau = 0.02;
 	double k = exp(-(TFRAME/t));
 	 
 	for(i=0; i<FFTLEN; i++){
@@ -352,18 +366,3 @@ void lpf_1(float *data, float t){
 	}
 	data [i] = P[i];
 }
-/*
-void lpf_2(float *data, float t){
-	
-	int i;
-	double k = exp(-(TFRAME/t));
-	data_squ = (float *) calloc(FFTLEN, sizeof(float));
-	P = (float *) calloc(FFTLEN, sizeof(float)); 
-
-	for(i=0; i<FFTLEN; i++){
-		data_squ [i] = data[i]*data[i];
-		P[i] = (1 - k)*data_squ[i] + k*P[i];
-	}
-	data [i] = sqrt(P[i]);
-}
-*/
