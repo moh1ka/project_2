@@ -30,4 +30,5 @@ for enhancement 5: make a difference on selection of G
 		   G smaller, makes the noise supression harsher
 			(5 is worse at noise reduction/supression)
 
-for enahncement 2: use cabs value instead of complex to do a fair comparison
+for enahncement 2: use cabs value instead of complex to do a fair comparison.
+			2 is not mean ot be on at the same time as 1.
