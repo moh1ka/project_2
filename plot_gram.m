@@ -13,6 +13,7 @@ the short-term, time-localized frequency content of x.
 %}
 spectrogram(y,'yaxis')
 %{
+% Some code I found online that I have NOT tested:
 Xtwz = zeros(N,nframes); % pre-allocate STFT output array
 M = length(w);           % M = window length, N = FFT length
 zp = zeros(N-M,1);       % zero padding (to be inserted)
