@@ -84,48 +84,42 @@ DSK6713_AIC23_Config Config = { \
 // Codec handle:- a variable used to identify audio interface  
 DSK6713_AIC23_CodecHandle H_Codec;
 
-float *inbuffer, *outbuffer;   		/* Input/output circular buffers */
+float *inbuffer, *outbuffer;   	    /* Input/output circular buffers */
 float *inframe, *outframe;          /* Input and output frames *///and intermediate frame for processing
 float *inwin, *outwin;              /* Input and output windows */
-float ingain, outgain;				/* ADC and DAC gains */ 
-float cpufrac; 						/* Fraction of CPU time used */
+float ingain, outgain;		    /* ADC and DAC gains */ 
+float cpufrac; 			    /* Fraction of CPU time used */
 volatile int io_ptr=0;              /* Input/ouput pointer for circular buffers */
 volatile int frame_ptr=0;           /* Frame pointer */
-float *mag;
-float *mag_min;
+float *mag_x;
+float *noise;
 
-float *p;
+float *lpf_x;
 float *x;
 
 float *M1;
 float *M2;
 float *M3;
 float *M4;
-float *G;
-complex *c_old; //corresponds to old Y(w)
-//float *G_old;
-//float *G_older;
+float *G;	//Frequency dependent gain factor
+complex *Y_old; //corresponds to old Y(w)
 
 float lambda = 0.1;
-float lambda_8 = 0.1;
 float alpha = 4;
 float tau = 0.08;
-//float lambda_6 = 0.1;
-//float alpha_6 = 4;
-float tau_3 = 0.02;
+float tau_3 = 0.02; //tau value for enhancement 3
 
 int counter = 0;          
-int delay_8 = 0;
-float threshold = 10;
+float threshold = 10; //threshold for enhancement 8
   
-int process_on = 1;//0 = no processing
-int enhance_1 = 0;
-int enhance_2 = 0;
-int enhance_3 = 0;
-int enhance_4 = 0;
-int enhance_5 = 0;
-int enhance_6 = 0;
-int enhance_8 = 0;
+int process_on = 1;	//0 = no processing
+int enhance_1 = 0;	//Low pass filter |X(w)|
+int enhance_2 = 0;	//Low pass filter X(w) in power domain
+int enhance_3 = 0;	//Low pass filer noise estimate
+int enhance_4 = 0;	//Change G(w)
+int enhance_5 = 0;	//Calculate G(w) in power domain
+int enhance_6 = 0;	//Oversubtractionn
+int enhance_8 = 0;	//Residual noise reduction
 /*********************************************************************************************/
 float min (float a, float b){
 	if(b<a){
@@ -158,26 +152,24 @@ void main()
 /*  Initialize and zero fill arrays */  
 
 	inbuffer	= (float *) calloc(CIRCBUF, sizeof(float));	/* Input array */
-    outbuffer	= (float *) calloc(CIRCBUF, sizeof(float));	/* Output array */
+        outbuffer	= (float *) calloc(CIRCBUF, sizeof(float));	/* Output array */
 	inframe		= (float *) calloc(FFTLEN, sizeof(float));	/* Array for processing*/
-    outframe	= (float *) calloc(FFTLEN, sizeof(float));	/* Array for processing*/
-    inwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Input window */
-    outwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Output window */
-	mag	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	mag_min	    = (float *) calloc(FFTLEN, sizeof(float)); /* old mag spectrum*/
+        outframe	= (float *) calloc(FFTLEN, sizeof(float));	/* Array for processing*/
+        inwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Input window */
+        outwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Output window */
+	mag_x	        = (float *) calloc(FFTLEN, sizeof(float));      /* magnitude spectrum*/
+	noise	        = (float *) calloc(FFTLEN, sizeof(float));      /* noise spectrum*/
 	
-	p = (float *) calloc(FFTLEN, sizeof(float));
-	x = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	lpf_x           = (float *) calloc(FFTLEN, sizeof(float));      /*stores low pass filtered spectrum*/             
+	x 		= (float *) calloc(FFTLEN, sizeof(float));      /* magnitude spectrum*/
 	
 	//Min noise buffers
-	M1	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	M2	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	M3	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	M4	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	G	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-    c_old		= (complex *) calloc(FFTLEN, sizeof(complex));
-	//G_old	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
-	//G_older	        = (float *) calloc(FFTLEN, sizeof(float)); /* magnitude spectrum*/
+	M1	        = (float *) calloc(FFTLEN, sizeof(float)); /* Stores minimum spectrum for current 2.5 sec*/
+	M2	        = (float *) calloc(FFTLEN, sizeof(float)); /* Stores minimum spectrum for previous 2.5 sec */
+	M3	        = (float *) calloc(FFTLEN, sizeof(float)); /* Stores minimum spectrum for previous 5 - 2.5 sec*/
+	M4	        = (float *) calloc(FFTLEN, sizeof(float)); /* Stores minimum spectrum for previous 7.5 - 5 sec*/
+	G	        = (float *) calloc(FFTLEN, sizeof(float)); /* */
+        Y_old		= (complex *) calloc(FFTLEN, sizeof(complex));
 	
 	/* initialize board and the audio port */
   	init_hardware();
@@ -241,7 +233,7 @@ void process_frame(void)
 {
 	int k, m, i; 
 	int io_ptr0;  
-	double snr = 0;
+	double snr = 0; //signal to noise ratio
 	complex *c;
 
 	/* work out fraction of available CPU time used by algorithm */    
@@ -269,66 +261,59 @@ void process_frame(void)
 	/************************* DO PROCESSING OF FRAME  HERE **************************/
 	
 	c = (complex *) calloc(FFTLEN, sizeof(complex)); /* Array for processing*/
+	
 	//copy inframe into complex valued array c	
 	for(i=0; i<FFTLEN; i++)
 	{
 		c[i].r = inframe[i];
 	}
 	
+	//perform fft
 	fft(FFTLEN, c);
 	
+	//turn on enhancements, if process_on = 0 -> inframe = outframe
 	if(process_on == 1)
 	{
 		counter++;
-
 		
 		for(i=0; i<FFTLEN; i++)
 		{
-			mag[i] = cabs(c[i]);//in magnitude spec
+			mag_x[i] = cabs(c[i]); // Calculates current magnitude spectrum
 		}
-			
-		if (enhance_1 == 1)
-		{
-			lpf_1(mag,p,tau);
-			memcpy (x, p, FFTLEN*sizeof(float)); // x contains the current magnitude spec that we will later do processing on
-			//in this case, x = low pass filtered magnitude spectrum
-		}
-		else
-		{
-			memcpy (x, mag, FFTLEN*sizeof(float)); // x = mag
-		}
-		
-		
-		if(enhance_1 == 1 || enhance_2 == 1)
+					
+		if(enhance_1 == 1 || enhance_2 == 1) //For enhancement 2 power spectrum is used
 		{	
-			if(enhance_2 == 1)//lpf |X(w)|^2 and take square root
+			if(enhance_2 == 1) //When enhancement 1 and 2 are used in conjunction
 			{
-				lpf_square (mag, p, tau);
-				//lpf_1(mag*mag, p ,tau);
-				//p = sqrt(p);
+				lpf_square (mag, lpf_x, tau); //lpf_square does: |X(w)|^2 and takes square root
 			}
 			else
 			{
-				lpf_1(mag,p,tau); //p stores low pass filtered input (mag)
+				lpf_1(mag,lpf_x,tau); //lpf mag_x and store in lpf_x
 			}
 			
-			memcpy (x, p, FFTLEN*sizeof(float));
+			memcpy (x, lpf_x, FFTLEN*sizeof(float));
+			// x contains the processed magnitude spectrum
+			//in this case, x = low pass filtered magnitude spectrum (enhancement_2 == 0) / power spectrum (enhancement_2 == 1)
 		}
 		else
 		{
-			memcpy (x, mag, FFTLEN*sizeof(float));
+			memcpy (x, mag, FFTLEN*sizeof(float)); //x = original magnitude spectrum
 		}
 		
-		memcpy (M1, x, FFTLEN*sizeof(float));
+		memcpy (M1, x, FFTLEN*sizeof(float)); 
+		//M1 needs to be intialised to the magnitude spectrum of x 
+		//otherwise there would be no noise reduction
 		
 		for (i=0;i<FFTLEN;i++)
 		{
-			M1[i] = min(M1[i], x[i]);
+			M1[i] = min(M1[i], x[i]); // store running minimum in M1
 		}
 		
-		if (counter == 79)//works with 79 as well
+		// After 2.5 seconds, rotate buffers
+		if (counter == 312)
 		{
-			counter = 0;
+			counter = 0; 
 			memcpy (M4, M3, FFTLEN*sizeof(float));
 			memcpy (M3, M2, FFTLEN*sizeof(float));
 			memcpy (M2, M1, FFTLEN*sizeof(float));
@@ -337,14 +322,15 @@ void process_frame(void)
 		
 		for( i=0; i<FFTLEN;i++)
 		{
-			mag_min[i] =  min(M1[i], M2[i]); //finding min across M1-M4
-			mag_min[i] =  min(M3[i], mag_min[i]);//finding min across M1-M4
-			//mag_min[i] = ( alpha * (min(M4[i], mag_min[i])) );//finding min across M1-M4
-			mag_min[i] = (min(M4[i], mag_min[i]));
+			// Noise estimate is minimum across M1-M4
+			noise[i] =  min(M1[i], M2[i]); 
+			noise[i] =  min(M3[i], noise[i]);
+			noise[i] = (min(M4[i], noise[i]));
 			
+			// Oversubtraction i.e variable alpha
 			if(enhance_6 == 1)
 			{
-				snr = ( (mag[i]-mag_min[i])/mag_min[i] );
+				snr = ( (mag_x[i]-noise[i])/noise[i] );
 				if ( snr <= -5 )
 				{
 					alpha = 5;
@@ -357,109 +343,75 @@ void process_frame(void)
 				{
 					alpha = 4 - (0.15 * snr);
 				}	
-				//G[i] = max( lambda_6 ,  ( 1 - (alpha_6*(1/snr)*mag_min[i]) ) );
 			}
-			mag_min[i] = alpha*mag_min[i];
 			
+			noise[i] = alpha*noisei]; //Noise estimate
+			
+			// Low pass filter the noise estimate
 			if( enhance_3 == 1)
 			{
-				lpf_1_el (mag_min[i], mag_min[i], tau_3);
+				lpf_1_el (noise[i], noise[i], tau_3);
 			}
 			
-			G[i] = max( lambda,  ( 1 - (mag_min[i]/mag[i]) ) );
+			// Default G(w)
+			G[i] = max( lambda,  ( 1 - (noise[i]/mag_x[i]) ) );
 			
+			// Change G(w)
 			switch (enhance_4)
 			{
-				/*
-				case 0:
-				G[i] = max( lambda,  ( 1 - (mag_min[i]/mag[i]) ) );
-				break;
-				*/
 				case 1:
-				G[i] = max( lambda * (mag_min[i]/mag[i]) ,  ( 1 - (mag_min[i]/mag[i]) ) );
+				G[i] = max( lambda * (noise[i]/mag_x[i]) ,  ( 1 - (noise[i]/mag_x[i]) ) );
 				break ;
 				case 2:
-				G[i] = max( lambda * (p[i]/mag[i]) ,  ( 1 - (mag_min[i]/mag[i]) ) );
+				G[i] = max( lambda * (lpf_x[i]/mag_x[i]) ,  ( 1 - (noise[i]/mag_x[i]) ) );
 				break;
 				case 3:
-				G[i] = max( lambda * (mag_min[i]/p[i]) ,  ( 1 - (mag_min[i]/p[i]) ) );
+				G[i] = max( lambda * (noise[i]/lpf_x[i]) ,  ( 1 - (noise[i]/lpf_x[i]) ) );
 				break;
 				case 4:
-				G[i] = max( lambda ,  ( 1 - (mag_min[i]/p[i]) ) );
-				//break;
-				/*
-				case 6:
-				snr = (mag[i]/mag_min[i]);
-				//G[i] = max( lambda_6 ,  ( 1 - alpha_6* pow(mag_min[i]/mag[i],2)) );
-				G[i] = max( lambda_6 ,  ( 1 - (alpha_6*(1/snr)*mag_min[i]) ) );
-				break;
-				*/
-				/*
-				default:
-				G[i] = max( lambda,  ( 1 - (mag_min[i]/mag[i]) ) );
-				*/
+				G[i] = max( lambda ,  ( 1 - (noise[i]/lpf_x[i]) ) );
 			}
 			
+			// Change G(w) in Power domain
 			switch (enhance_5)
 			{
-				case 1:
-				G[i] = max( lambda, sqrt(( 1 - (mag_min[i]*mag_min[i])/(mag[i]*mag[i]) )) );
-				case 2:
-				G[i] = max( lambda * sqrt( (mag_min[i]*mag_min[i])/(mag[i]*mag[i])) , sqrt( 1 - (mag_min[i]*mag_min[i])/(mag[i]*mag[i]) ) );
+				case 1: // Calculates default G[i] using Power spectrum
+				G[i] = max( lambda, sqrt(( 1 - (noise[i]*noise[i])/(mag_x[i]*mag_x[i]) )) );
+				case 2: // Corresponds to enhance_4 == 1
+				G[i] = max( lambda * sqrt( (noise[i]*noise[i])/(mag_x[i]*mag_x[i])) , sqrt( 1 - (noise[i]*noise[i])/(mag_x[i]*mag_x[i]) ) );
 				break ;
-				case 3:
-				G[i] = max( lambda * sqrt( (p[i]*p[i])/(mag[i]*mag[i]) ) , sqrt( ( 1 - (mag_min[i]*mag_min[i])/(mag[i]*mag[i]) ) ) );
+				case 3: // Corresponds to enhance_4 == 2
+				G[i] = max( lambda * sqrt( (lpf_x[i]*lpf_x[i])/(mag_x[i]*mag_x[i]) ) , sqrt( ( 1 - (noise[i]*noise[i])/(mag_x[i]*mag_x[i]) ) ) );
 				break;
-				case 4:
-				G[i] = max( lambda * sqrt( (mag_min[i]*mag_min[i])/(p[i]*p[i]) ) ,  sqrt( 1 - (mag_min[i]*mag_min[i])/(p[i]*p[i]) ) );
+				case 4: // Corresponds to enhance_4 == 3
+				G[i] = max( lambda * sqrt( (noise[i]*noise[i])/(lpf_x[i]*lpf_x[i]) ) ,  sqrt( 1 - (noise[i]*noise[i])/(lpf_x[i]*lpf_x[i]) ) );
 				break;
-				case 5:
-				G[i] = max( lambda ,  sqrt( 1 - (mag_min[i]*mag_min[i])/(p[i]*p[i]) ) );
+				case 5: // Corresponds to enhance_4 == 4
+				G[i] = max( lambda ,  sqrt( 1 - (noise[i]*noise[i])/(lpf_x[i]*lpf_x[i]) ) );
 			}
-			
-			/*
-			if(enhance_8 == 1)
-			{
-				if (G[i] < threshold)
-				{
-					//c[i] = rmul( G[i], c[i]);
-					if ( cabs(c[i]) > cabs(c_old[i]) )
-					{
-						c[i] = c_old[i];
-					} 
-					//c_old[i] = c[i];
-				}
-			}*/
-			
-			//free(p);
-			c[i] = rmul( G[i], c[i]);
+
+			c[i] = rmul( G[i], c[i]); //Overwrites c with the output Y(w) = G(w)*X(w)
 
 		}
 		
+		// Residual Noise Reduction
 		if(enhance_8 == 1)
 		{
 			for(i=0; i<FFTLEN; i++)
 			{
-				if ( (mag_min[i]/mag[i])  >  threshold)
+				if ( (noise[i]/mag_x[i])  >  threshold)
 				{
 					//c[i] = rmul( G[i], c[i]);
-					if ( cabs(c[i]) > cabs(c_old[i]) )
+					if ( cabs(c[i]) > cabs(Y_old[i]) )
 					{
-						c[i] = c_old[i];
+						c[i] = Y_old[i];
 					} 
-						//c_old[i] = c[i];
 				}
-				c_old[i] = c[i];
+				Y_old[i] = c[i];
 			}
 		}
 			
-		/*
-		if(enhance_8 == 1)
-		{
-			memcpy (c_old, c, FFTLEN*sizeof(complex));
-		}*/
-		
-	}
+	}// End of processing 
 	
 	ifft(FFTLEN, c);
 	
