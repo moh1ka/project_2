@@ -311,7 +311,7 @@ void process_frame(void)
 		}
 		
 		// After 2.5 seconds, rotate buffers
-		if (counter == 312)
+		if (counter == 79)
 		{
 			counter = 0; 
 			memcpy (M4, M3, FFTLEN*sizeof(float));
