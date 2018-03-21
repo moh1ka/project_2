@@ -43,31 +43,28 @@
 // Some functions to help with writing/reading the audio ports when using interrupts.
 #include <helper_functions_ISR.h>
 
-#define WINCONST 0.85185			/* 0.46/0.54 for Hamming window */
-#define FSAMP 8000.0		/* sample frequency, ensure this matches Config for AIC */
-#define FFTLEN 256					/* fft length = frame length 256/8000 = 32 ms*/
-#define NFREQ (1+FFTLEN/2)			/* number of frequency bins from a real FFT */
-#define OVERSAMP 4					/* oversampling ratio (2 or 4) */  
+#define WINCONST 0.85185		/* 0.46/0.54 for Hamming window */
+#define FSAMP 8000.0			/* sample frequency, ensure this matches Config for AIC */
+#define FFTLEN 256			/* fft length = frame length 256/8000 = 32 ms*/
+#define NFREQ (1+FFTLEN/2)		/* number of frequency bins from a real FFT */
+#define OVERSAMP 4			/* oversampling ratio is 4 */  
 #define FRAMEINC (FFTLEN/OVERSAMP)	/* Frame increment */
 #define CIRCBUF (FFTLEN+FRAMEINC)	/* length of I/O buffers */
 
-#define OUTGAIN 16000.0				/* Output gain for DAC */
+#define OUTGAIN 16000.0			/* Output gain for DAC */
 #define INGAIN  (1.0/16000.0)		/* Input gain for ADC  */
 // PI defined here for use in your code 
 #define PI 3.141592653589793
-#define TFRAME FRAMEINC/FSAMP       /* time between calculation of each frame */
-/******************************* Enhancement Switches*********************/
-//#define enhance_1 0;
-//#define enhance_2 1;
-//#define enhance_3 0;
+#define TFRAME FRAMEINC/FSAMP 		/* time between calculation of each frame */
+
 /******************************* Global declarations ********************************/
 
 /* Audio port configuration settings: these values set registers in the AIC23 audio 
    interface to configure it. See TI doc SLWS106D 3-3 to 3-10 for more info. */
 DSK6713_AIC23_Config Config = { \
-			 /**********************************************************************/
-			 /*   REGISTER	            FUNCTION			      SETTINGS         */ 
-			 /**********************************************************************/\
+/**********************************************************************/
+/*   REGISTER	            FUNCTION			      SETTINGS         */ 
+/**********************************************************************/\
     0x0017,  /* 0 LEFTINVOL  Left line input channel volume  0dB                   */\
     0x0017,  /* 1 RIGHTINVOL Right line input channel volume 0dB                   */\
     0x01f9,  /* 2 LEFTHPVOL  Left channel headphone volume   0dB                   */\
@@ -78,7 +75,7 @@ DSK6713_AIC23_Config Config = { \
     0x0043,  /* 7 DIGIF      Digital audio interface format  16 bit                */\
     0x008d,  /* 8 SAMPLERATE Sample rate control        8 KHZ-ensure matches FSAMP */\
     0x0001   /* 9 DIGACT     Digital interface activation    On                    */\
-			 /**********************************************************************/
+/**********************************************************************/
 };
 
 // Codec handle:- a variable used to identify audio interface  
@@ -111,7 +108,9 @@ float tau_3 = 0.02; //tau value for enhancement 3
 
 int counter = 0;          
 float threshold = 10; //threshold for enhancement 8
-  
+
+/******************************* Enhancement Switches*********************/
+
 int process_on = 1;	//0 = no processing
 int enhance_1 = 0;	//Low pass filter |X(w)|
 int enhance_2 = 0;	//Low pass filter X(w) in power domain
@@ -120,6 +119,7 @@ int enhance_4 = 0;	//Change G(w)
 int enhance_5 = 0;	//Calculate G(w) in power domain
 int enhance_6 = 0;	//Oversubtractionn
 int enhance_8 = 0;	//Residual noise reduction
+
 /*********************************************************************************************/
 float min (float a, float b){
 	if(b<a){
