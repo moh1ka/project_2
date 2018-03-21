@@ -325,7 +325,7 @@ void process_frame(void)
 			// Noise estimate is minimum across M1-M4
 			noise[i] =  min(M1[i], M2[i]); 
 			noise[i] =  min(M3[i], noise[i]);
-			noise[i] = (min(M4[i], noise[i]));
+			noise[i] =  min(M4[i], noise[i]);
 			
 			// Oversubtraction i.e variable alpha
 			if(enhance_6 == 1)
