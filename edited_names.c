@@ -298,7 +298,7 @@ void process_frame(void)
 		}
 		else
 		{
-			memcpy (x, mag, FFTLEN*sizeof(float)); //x = original magnitude spectrum
+			memcpy (x, mag_x, FFTLEN*sizeof(float)); //x = original magnitude spectrum
 		}
 		
 		memcpy (M1, x, FFTLEN*sizeof(float)); 
