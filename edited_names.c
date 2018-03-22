@@ -285,11 +285,11 @@ void process_frame(void)
 		{	
 			if(enhance_2 == 1) //When enhancement 1 and 2 are used in conjunction
 			{
-				lpf_square (mag, lpf_x, tau); //lpf_square does: |X(w)|^2 and takes square root
+				lpf_square (mag_x, lpf_x, tau); //lpf_square does: |X(w)|^2 and takes square root
 			}
 			else
 			{
-				lpf_1(mag,lpf_x,tau); //lpf mag_x and store in lpf_x
+				lpf_1(mag_x,lpf_x,tau); //lpf mag_x and store in lpf_x
 			}
 			
 			memcpy (x, lpf_x, FFTLEN*sizeof(float));
